@@ -21,18 +21,28 @@ public sealed class GameManager
 
     public int CurrentRound { get; private set; }
 
-    public IReadOnlyList<Player> ActivePlayers =>
-    players.Where(player => !player.IsEliminated).ToList();
+    public Guid? CurrentPlayerId { get; private set; }
 
-    public Player? Winner =>
-        IsGameComplete
-            ? players.Single(player => !player.IsEliminated)
-            : null;
+    public Player? CurrentPlayer =>
+        CurrentPlayerId is null
+            ? null
+            : players.FirstOrDefault(
+                player => player.Id == CurrentPlayerId);
+
+    public IReadOnlyList<Player> ActivePlayers =>
+        players
+            .Where(player => !player.IsEliminated)
+            .ToList();
 
     public bool IsGameComplete =>
         IsGameRunning
         && players.Count > 1
         && players.Count(player => !player.IsEliminated) == 1;
+
+    public Player? Winner =>
+        IsGameComplete
+            ? players.Single(player => !player.IsEliminated)
+            : null;
 
     public bool AddPlayer(string playerName)
     {
@@ -90,27 +100,26 @@ public sealed class GameManager
             return false;
         }
 
+        foreach (var player in players)
+        {
+            player.IsEliminated = false;
+            player.LastRoll = null;
+        }
+
         IsGameRunning = true;
         CurrentRound = 1;
 
         hotPotatoNumbers.Clear();
         AddUniqueNumbers(Settings.InitialNumberCount);
 
+        CurrentPlayerId = players
+            .FirstOrDefault(player => !player.IsEliminated)
+            ?.Id;
+
         return true;
     }
 
-    public IReadOnlyList<int> StartNextRound()
-    {
-        if (!IsGameRunning || IsGameComplete)
-        {
-            return Array.Empty<int>();
-        }
-
-        CurrentRound++;
-
-        return AddUniqueNumbers(Settings.NumbersPerRound);
-    }
-        public bool ProcessRoll(
+    public bool ProcessRoll(
         Guid playerId,
         int roll,
         out bool isHotPotato)
@@ -136,23 +145,91 @@ public sealed class GameManager
             return false;
         }
 
+        if (CurrentPlayerId != playerId)
+        {
+            return false;
+        }
+
         player.LastRoll = roll;
+
         isHotPotato = hotPotatoNumbers.Contains(roll);
 
-        if (isHotPotato)
+        if (!isHotPotato)
         {
-            player.IsEliminated = true;
+            AdvanceToNextActivePlayer(player.Id);
+            return true;
         }
+
+        player.IsEliminated = true;
+
+        var remainingPlayerCount = players.Count(
+            currentPlayer => !currentPlayer.IsEliminated);
+
+        if (remainingPlayerCount == 1)
+        {
+            CurrentPlayerId = null;
+            return true;
+        }
+
+        CurrentRound++;
+
+        AddUniqueNumbers(Settings.NumbersPerRound);
+
+        AdvanceToNextActivePlayer(player.Id);
 
         return true;
     }
+
     public void ResetGame()
     {
-        IsGameRunning = false;
-        CurrentRound = 0;
-
         hotPotatoNumbers.Clear();
-        players.Clear();
+
+        foreach (var player in players)
+        {
+            player.IsEliminated = false;
+            player.LastRoll = null;
+        }
+
+        CurrentRound = 0;
+        IsGameRunning = false;
+        CurrentPlayerId = null;
+    }
+
+    private void AdvanceToNextActivePlayer(Guid currentPlayerId)
+    {
+        if (players.Count == 0)
+        {
+            CurrentPlayerId = null;
+            return;
+        }
+
+        var currentIndex = players.FindIndex(
+            player => player.Id == currentPlayerId);
+
+        if (currentIndex < 0)
+        {
+            CurrentPlayerId = players
+                .FirstOrDefault(player => !player.IsEliminated)
+                ?.Id;
+
+            return;
+        }
+
+        for (var offset = 1; offset <= players.Count; offset++)
+        {
+            var nextIndex =
+                (currentIndex + offset) % players.Count;
+
+            var nextPlayer = players[nextIndex];
+
+            if (!nextPlayer.IsEliminated)
+            {
+                CurrentPlayerId = nextPlayer.Id;
+                return;
+            }
+        }
+
+        CurrentPlayerId = null;
     }
 
     private List<int> AddUniqueNumbers(int numberCount)
@@ -160,17 +237,25 @@ public sealed class GameManager
         var availableNumbers = Enumerable
             .Range(
                 Settings.MinimumNumber,
-                Settings.MaximumNumber - Settings.MinimumNumber + 1)
+                Settings.MaximumNumber
+                - Settings.MinimumNumber
+                + 1)
             .Except(hotPotatoNumbers)
             .ToList();
 
-        var actualCount = Math.Min(numberCount, availableNumbers.Count);
+        var actualCount = Math.Min(
+            numberCount,
+            availableNumbers.Count);
+
         var generatedNumbers = new List<int>();
 
         for (var index = 0; index < actualCount; index++)
         {
-            var selectedIndex = random.Next(availableNumbers.Count);
-            var selectedNumber = availableNumbers[selectedIndex];
+            var selectedIndex = random.Next(
+                availableNumbers.Count);
+
+            var selectedNumber =
+                availableNumbers[selectedIndex];
 
             generatedNumbers.Add(selectedNumber);
             hotPotatoNumbers.Add(selectedNumber);
@@ -192,7 +277,9 @@ public sealed class GameManager
         }
 
         var availableNumberCount =
-            Settings.MaximumNumber - Settings.MinimumNumber + 1;
+            Settings.MaximumNumber
+            - Settings.MinimumNumber
+            + 1;
 
         return Settings.InitialNumberCount > 0
             && Settings.InitialNumberCount <= availableNumberCount
