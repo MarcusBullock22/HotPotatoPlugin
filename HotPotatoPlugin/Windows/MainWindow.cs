@@ -603,6 +603,16 @@ public sealed class MainWindow : Window
             + $"{gameManager.WinnerPot:N0} gil.";
 
         partyChatService.QueueMessage(
+            "=== HOT POTATO ===\n"
+            + "HOW TO PLAY:\n"
+            + "- Dealer announces the starting Hot Potato numbers.\n"
+            + $"- On your turn use /dice party {rollLimit}.\n"
+            + "- Avoid the announced Hot Potato numbers.\n"
+            + "- Roll one and you're OUT!\n"
+            + $"- {potatoesAddedPerRound} new Hot Potato numbers are added after each elimination.\n"
+            + "- Last player standing wins!");
+
+        partyChatService.QueueMessage(
             $"Hot Potato is starting! "
             + $"{gameManager.StartingPlayerCount} players. "
             + $"Use /dice party {rollLimit}.");
@@ -611,7 +621,7 @@ public sealed class MainWindow : Window
             $"Starting with {startingPotatoCount} Hot Potato numbers. "
             + $"{potatoesAddedPerRound} new numbers will be added "
             + "after each elimination.");
-            
+
         partyChatService.QueueMessage(
             $"Entry: "
             + $"{gameManager.Settings.EntryFee:N0} gil per player. "
