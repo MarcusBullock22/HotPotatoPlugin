@@ -28,17 +28,27 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService]
     internal static IChatGui ChatGui { get; private set; } = null!;
 
+    [PluginService]
+    internal static IFramework Framework { get; private set; } = null!;
+
     private const string CommandName = "/hotpotato";
 
     private readonly WindowSystem windowSystem = new("HotPotatoPlugin");
     private readonly GameManager gameManager;
     private readonly MainWindow mainWindow;
+    private readonly PartyChatService partyChatService;
 
     public Plugin()
     {
         gameManager = new GameManager();
+
+        partyChatService = new PartyChatService(
+        Framework,
+        Log);
+
         mainWindow = new MainWindow(
             gameManager,
+            partyChatService,
             PartyList,
             ObjectTable,
             ChatGui);
@@ -65,7 +75,7 @@ public sealed class Plugin : IDalamudPlugin
         PluginInterface.UiBuilder.OpenMainUi -= ToggleMainUi;
         mainWindow.Dispose();
         CommandManager.RemoveHandler(CommandName);
-
+        partyChatService.Dispose();
         windowSystem.RemoveAllWindows();
     }
 

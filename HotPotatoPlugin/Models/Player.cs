@@ -16,4 +16,9 @@ public sealed class Player
     {
         Name = name;
     }
+
+    public bool IsRemoved { get; set; }
+
+    public bool IsActive =>
+    !IsEliminated && !IsRemoved;
 }

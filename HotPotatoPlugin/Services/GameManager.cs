@@ -23,6 +23,32 @@ public sealed class GameManager
 
     public Guid? CurrentPlayerId { get; private set; }
 
+    public int StartingPlayerCount { get; private set; }
+
+    public int PayingPlayerCount =>
+        players.Count(player => !player.IsRemoved);
+
+    public long GrossPot =>
+        PayingPlayerCount * Settings.EntryFee;
+
+    public long HouseCutAmount
+    {
+        get
+        {
+            var normalizedHouseCut = Math.Clamp(
+                Settings.HouseCutPercent,
+                0f,
+                100f);
+
+            return (long)Math.Round(
+                GrossPot * (normalizedHouseCut / 100f),
+                MidpointRounding.AwayFromZero);
+        }
+    }
+
+    public long WinnerPot =>
+        GrossPot - HouseCutAmount;
+
     public Player? CurrentPlayer =>
         CurrentPlayerId is null
             ? null
@@ -31,17 +57,17 @@ public sealed class GameManager
 
     public IReadOnlyList<Player> ActivePlayers =>
         players
-            .Where(player => !player.IsEliminated)
+            .Where(player => player.IsActive)
             .ToList();
 
     public bool IsGameComplete =>
         IsGameRunning
         && players.Count > 1
-        && players.Count(player => !player.IsEliminated) == 1;
+        && players.Count(player => player.IsActive) == 1;
 
     public Player? Winner =>
         IsGameComplete
-            ? players.Single(player => !player.IsEliminated)
+            ? players.Single(player => player.IsActive)
             : null;
 
     public bool AddPlayer(string playerName)
@@ -88,6 +114,55 @@ public sealed class GameManager
         return true;
     }
 
+    public bool RemovePlayerDuringGame(
+        Guid playerId,
+        out Player? removedPlayer,
+        out Player? nextPlayer)
+    {
+        removedPlayer = null;
+        nextPlayer = CurrentPlayer;
+
+        if (!IsGameRunning || IsGameComplete)
+        {
+            return false;
+        }
+
+        var player = players.FirstOrDefault(
+            currentPlayer => currentPlayer.Id == playerId);
+
+        if (player is null
+            || player.IsEliminated
+            || player.IsRemoved)
+        {
+            return false;
+        }
+
+        var wasCurrentPlayer =
+            CurrentPlayerId == player.Id;
+
+        player.IsRemoved = true;
+        player.LastRoll = null;
+
+        removedPlayer = player;
+
+        if (players.Count(currentPlayer => currentPlayer.IsActive) == 1)
+        {
+            CurrentPlayerId = null;
+            nextPlayer = null;
+
+            return true;
+        }
+
+        if (wasCurrentPlayer)
+        {
+            AdvanceToNextActivePlayer(player.Id);
+        }
+
+        nextPlayer = CurrentPlayer;
+
+        return true;
+    }
+
     public bool StartGame()
     {
         if (players.Count < 2)
@@ -103,8 +178,11 @@ public sealed class GameManager
         foreach (var player in players)
         {
             player.IsEliminated = false;
+            player.IsRemoved = false;
             player.LastRoll = null;
         }
+
+        StartingPlayerCount = players.Count;
 
         IsGameRunning = true;
         CurrentRound = 1;
@@ -113,7 +191,7 @@ public sealed class GameManager
         AddUniqueNumbers(Settings.InitialNumberCount);
 
         CurrentPlayerId = players
-            .FirstOrDefault(player => !player.IsEliminated)
+            .FirstOrDefault(player => player.IsActive)
             ?.Id;
 
         return true;
@@ -140,7 +218,7 @@ public sealed class GameManager
         var player = players.FirstOrDefault(
             currentPlayer => currentPlayer.Id == playerId);
 
-        if (player is null || player.IsEliminated)
+        if (player is null || !player.IsActive)
         {
             return false;
         }
@@ -163,7 +241,7 @@ public sealed class GameManager
         player.IsEliminated = true;
 
         var remainingPlayerCount = players.Count(
-            currentPlayer => !currentPlayer.IsEliminated);
+            currentPlayer => currentPlayer.IsActive);
 
         if (remainingPlayerCount == 1)
         {
@@ -187,12 +265,14 @@ public sealed class GameManager
         foreach (var player in players)
         {
             player.IsEliminated = false;
+            player.IsRemoved = false;
             player.LastRoll = null;
         }
 
         CurrentRound = 0;
         IsGameRunning = false;
         CurrentPlayerId = null;
+        StartingPlayerCount = 0;
     }
 
     private void AdvanceToNextActivePlayer(Guid currentPlayerId)
@@ -209,7 +289,7 @@ public sealed class GameManager
         if (currentIndex < 0)
         {
             CurrentPlayerId = players
-                .FirstOrDefault(player => !player.IsEliminated)
+                .FirstOrDefault(player => player.IsActive)
                 ?.Id;
 
             return;
@@ -222,7 +302,7 @@ public sealed class GameManager
 
             var nextPlayer = players[nextIndex];
 
-            if (!nextPlayer.IsEliminated)
+            if (nextPlayer.IsActive)
             {
                 CurrentPlayerId = nextPlayer.Id;
                 return;
@@ -271,18 +351,36 @@ public sealed class GameManager
 
     private bool HasValidSettings()
     {
-        if (Settings.MinimumNumber >= Settings.MaximumNumber)
+        if (Settings.MaximumNumber <= 1)
         {
             return false;
         }
 
         var availableNumberCount =
-            Settings.MaximumNumber
-            - Settings.MinimumNumber
-            + 1;
+            Settings.MaximumNumber;
 
-        return Settings.InitialNumberCount > 0
-            && Settings.InitialNumberCount <= availableNumberCount
-            && Settings.NumbersPerRound > 0;
+        if (Settings.InitialNumberCount <= 0
+            || Settings.InitialNumberCount > availableNumberCount)
+        {
+            return false;
+        }
+
+        if (Settings.NumbersPerRound <= 0)
+        {
+            return false;
+        }
+
+        if (Settings.EntryFee < 0)
+        {
+            return false;
+        }
+
+        if (Settings.HouseCutPercent < 0f
+            || Settings.HouseCutPercent > 100f)
+        {
+            return false;
+        }
+
+        return true;
     }
 }

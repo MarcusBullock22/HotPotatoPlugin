@@ -1,44 +1,79 @@
-﻿using System.Linq;
-using System.Numerics;
-using Dalamud.Bindings.ImGui;
-using Dalamud.Interface.Windowing;
-using HotPotatoPlugin.Services;
-using System;
+﻿using System;
 using System.Collections.Generic;
-using Dalamud.Plugin.Services;
+using System.Linq;
+using System.Numerics;
+using System.Text.RegularExpressions;
+using Dalamud.Bindings.ImGui;
 using Dalamud.Game.Chat;
 using Dalamud.Game.Text;
-using System.Text.RegularExpressions;
+using Dalamud.Interface.Windowing;
+using Dalamud.Plugin.Services;
+using HotPotatoPlugin.Services;
 
 namespace HotPotatoPlugin.Windows;
 
 public sealed class MainWindow : Window
 {
     private readonly GameManager gameManager;
-    private IReadOnlyList<int> newestNumbers = Array.Empty<int>();
-    private string playerName = string.Empty;
-    private string statusMessage = string.Empty;
-    private Guid? selectedPlayerId;
-    private int manualRoll = 1;
-    private int minimumRoll = 1;
-    private int maximumRoll = 999;
     private readonly IPartyList partyList;
     private readonly IObjectTable objectTable;
     private readonly IChatGui chatGui;
+    private readonly PartyChatService partyChatService;
+    private IReadOnlyList<int> newestNumbers = Array.Empty<int>();
+    private string playerName = string.Empty;
+    private string statusMessage = string.Empty;
+    private int rollLimit = 999;
+    private int entryFeeInput = 100_000;
+    private float houseCutPercent = 30f;
+    private Guid? pendingRemovalPlayerId;
+    private int startingPotatoCount = 25;
+    private int potatoesAddedPerRound = 5;
 
     public MainWindow(
         GameManager gameManager,
+        PartyChatService partyChatService,
         IPartyList partyList,
         IObjectTable objectTable,
         IChatGui chatGui)
         : base("Hot Potato Game Manager")
     {
         this.gameManager = gameManager;
+        this.partyChatService = partyChatService;
         this.partyList = partyList;
         this.objectTable = objectTable;
         this.chatGui = chatGui;
 
         this.chatGui.ChatMessage += OnChatMessage;
+    }
+
+    public void Dispose()
+    {
+        chatGui.ChatMessage -= OnChatMessage;
+    }
+
+    public override void Draw()
+    {
+        DrawStatus();
+
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        if (gameManager.IsGameRunning)
+        {
+            DrawRunningGame();
+        }
+        else
+        {
+            DrawGameSetup();
+        }
+
+        if (!string.IsNullOrWhiteSpace(statusMessage))
+        {
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+            ImGui.TextWrapped(statusMessage);
+        }
     }
 
     private void OnChatMessage(IHandleableChatMessage chatMessage)
@@ -69,8 +104,8 @@ public sealed class MainWindow : Window
         }
 
         if (!int.TryParse(
-            rollMatch.Groups[3].Value,
-            out var roll))
+                rollMatch.Groups[3].Value,
+                out var roll))
         {
             return;
         }
@@ -80,17 +115,6 @@ public sealed class MainWindow : Window
             @"^[^\p{L}]+",
             string.Empty).Trim();
 
-        /*
-        * If the chat message includes a range, verify that it matches
-        * the range selected when the game started.
-        *
-        * Example:
-        * random! (1-300) 141
-        *
-        * Group 1 = 1
-        * Group 2 = 300
-        * Group 3 = 141
-        */
         if (rollMatch.Groups[1].Success
             && rollMatch.Groups[2].Success)
         {
@@ -104,35 +128,26 @@ public sealed class MainWindow : Window
                 return;
             }
 
-            if (messageMinimum != gameManager.Settings.MinimumNumber
+            if (messageMinimum != 1
                 || messageMaximum != gameManager.Settings.MaximumNumber)
             {
                 statusMessage =
-                    $"{senderName} used the wrong dice range. "
-                    + $"Expected "
-                    + $"{gameManager.Settings.MinimumNumber}-"
-                    + $"{gameManager.Settings.MaximumNumber}, "
-                    + $"but they used "
-                    + $"{messageMinimum}-{messageMaximum}.";
+                    $"{senderName} used the wrong dice limit. "
+                    + $"Expected {gameManager.Settings.MaximumNumber}, "
+                    + $"but they used {messageMaximum}.";
 
                 return;
             }
         }
-        else if (gameManager.Settings.MinimumNumber != 1
-                || gameManager.Settings.MaximumNumber != 999)
-        {
-            /*
-            * A message without a displayed range is treated as the
-            * standard 1-999 dice roll.
-            */
-            statusMessage =
-                $"{senderName} used the standard dice range. "
-                + $"Expected "
-                + $"{gameManager.Settings.MinimumNumber}-"
-                + $"{gameManager.Settings.MaximumNumber}.";
+            else if (gameManager.Settings.MaximumNumber != 999)
+            {
+                statusMessage =
+                    $"{senderName} used the standard dice limit of 999. "
+                    + $"Expected "
+                    + $"{gameManager.Settings.MaximumNumber}.";
 
-            return;
-        }
+                return;
+            }
 
         var player = gameManager.Players.FirstOrDefault(
             currentPlayer => string.Equals(
@@ -157,6 +172,7 @@ public sealed class MainWindow : Window
 
             return;
         }
+
         if (gameManager.CurrentPlayerId != player.Id)
         {
             statusMessage =
@@ -166,6 +182,10 @@ public sealed class MainWindow : Window
 
             return;
         }
+
+        var numbersBeforeRoll =
+            gameManager.HotPotatoNumbers.ToHashSet();
+
         if (!gameManager.ProcessRoll(
                 player.Id,
                 roll,
@@ -177,13 +197,27 @@ public sealed class MainWindow : Window
             return;
         }
 
+        var newlyAddedNumbers = gameManager.HotPotatoNumbers
+            .Where(number => !numbersBeforeRoll.Contains(number))
+            .ToList();
+
         if (gameManager.IsGameComplete
             && gameManager.Winner is not null)
         {
-            statusMessage = isHotPotato
-                ? $"{player.Name} rolled {roll}. HOT POTATO! "
-                + $"{gameManager.Winner.Name} wins!"
-                : $"{player.Name} rolled {roll}. Safe.";
+            statusMessage =
+                $"{player.Name} rolled {roll}. HOT POTATO! "
+                + $"{gameManager.Winner.Name} wins "
+                + $"{gameManager.WinnerPot:N0} gil!";
+
+            partyChatService.QueueMessage(
+                $"{player.Name} rolled {roll}. HOT POTATO!");
+
+            partyChatService.QueueMessage(
+                $"{gameManager.Winner.Name} wins Hot Potato!");
+
+            partyChatService.QueueMessage(
+                $"{gameManager.Winner.Name} receives "
+                + $"{gameManager.WinnerPot:N0} gil! ");
 
             return;
         }
@@ -191,21 +225,40 @@ public sealed class MainWindow : Window
         if (isHotPotato)
         {
             statusMessage =
-                $"{player.Name} rolled {roll}. HOT POTATO! " +
-                $"They were eliminated. Round {gameManager.CurrentRound} started. " +
-                $"{gameManager.CurrentPlayer?.Name} rolls next.";
+                $"{player.Name} rolled {roll}. HOT POTATO! "
+                + $"They were eliminated. Round "
+                + $"{gameManager.CurrentRound} started. "
+                + $"{gameManager.CurrentPlayer?.Name} rolls next.";
+
+            partyChatService.QueueMessage(
+                $"{player.Name} rolled {roll}. HOT POTATO! "
+                + "They have been eliminated.");
+
+            partyChatService.QueueMessage(
+                $"Round {gameManager.CurrentRound} is starting.");
+
+            partyChatService.QueueNumberList(
+                "New Hot Potato numbers:",
+                newlyAddedNumbers);
+
+            if (gameManager.CurrentPlayer is not null)
+            {
+                partyChatService.QueueMessage(
+                    $"{gameManager.CurrentPlayer.Name} rolls next!");
+            }
         }
         else
         {
             statusMessage =
-                $"{player.Name} rolled {roll}. Safe. " +
-                $"{gameManager.CurrentPlayer?.Name} rolls next.";
+                $"{player.Name} rolled {roll}. Safe. "
+                + $"{gameManager.CurrentPlayer?.Name} rolls next.";
+
+            partyChatService.QueueMessage(
+                $"{player.Name} rolled {roll}. Safe! "
+                + $"{gameManager.CurrentPlayer?.Name} rolls next.");
         }
     }
-    public void Dispose()
-    {
-        chatGui.ChatMessage -= OnChatMessage;
-    }   
+
     private void ImportPartyMembers()
     {
         if (gameManager.IsGameRunning)
@@ -242,9 +295,9 @@ public sealed class MainWindow : Window
 
             // The local player is the host, not a participant.
             if (string.Equals(
-                memberName,
-                localPlayerName,
-                StringComparison.OrdinalIgnoreCase))
+                    memberName,
+                    localPlayerName,
+                    StringComparison.OrdinalIgnoreCase))
             {
                 skippedCount++;
                 continue;
@@ -261,8 +314,11 @@ public sealed class MainWindow : Window
                 skippedCount++;
                 continue;
             }
-            gameManager.AddPlayer(memberName);
-            importedCount++;
+
+            if (gameManager.AddPlayer(memberName))
+            {
+                importedCount++;
+            }
         }
 
         statusMessage = importedCount > 0
@@ -275,36 +331,17 @@ public sealed class MainWindow : Window
                 $" Skipped {skippedCount} host or duplicate member(s).";
         }
     }
-    public override void Draw()
-    {
-        DrawStatus();
-
-        ImGui.Separator();
-        ImGui.Spacing();
-
-        if (gameManager.IsGameRunning)
-        {
-            DrawRunningGame();
-        }
-        else
-        {
-            DrawGameSetup();
-        }
-
-        if (!string.IsNullOrWhiteSpace(statusMessage))
-        {
-            ImGui.Spacing();
-            ImGui.Separator();
-            ImGui.Spacing();
-            ImGui.TextWrapped(statusMessage);
-        }
-    }
 
     private void DrawStatus()
     {
         ImGui.Text("Game Status");
 
-        if (gameManager.IsGameRunning)
+        if (gameManager.IsGameComplete
+            && gameManager.Winner is not null)
+        {
+            ImGui.Text("Game complete");
+        }
+        else if (gameManager.IsGameRunning)
         {
             ImGui.Text("Game in progress");
         }
@@ -337,10 +374,12 @@ public sealed class MainWindow : Window
         {
             AddPlayer();
         }
+
         if (ImGui.Button("Import Current Party"))
         {
             ImportPartyMembers();
         }
+
         ImGui.Spacing();
 
         if (gameManager.Players.Count == 0)
@@ -366,220 +405,499 @@ public sealed class MainWindow : Window
         ImGui.Separator();
         ImGui.Spacing();
 
-        ImGui.Text("Roll Range");
+        DrawRollSettings();
 
-        ImGui.SetNextItemWidth(120);
-        ImGui.InputInt("Minimum##RollRange", ref minimumRoll);
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
 
-        ImGui.SetNextItemWidth(120);
-        ImGui.InputInt("Maximum##RollRange", ref maximumRoll);
+        DrawPotSettings();
 
-        if (minimumRoll < 1)
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        DrawPotPreview();
+
+        ImGui.Spacing();
+
+        DrawStartGameButton();
+    }
+
+    private void DrawRollSettings()
+    {
+        ImGui.Text("Game Settings");
+
+        ImGui.SetNextItemWidth(180);
+        ImGui.InputInt(
+            "Roll Limit",
+            ref rollLimit,
+            50,
+            100);
+
+        rollLimit = Math.Max(1, rollLimit);
+
+        ImGui.TextDisabled(
+            $"Players will use: /dice party {rollLimit}");
+
+        ImGui.Spacing();
+
+        ImGui.SetNextItemWidth(180);
+        ImGui.InputInt(
+            "Starting Hot Potato Numbers",
+            ref startingPotatoCount,
+            1,
+            5);
+
+        startingPotatoCount = Math.Max(
+            1,
+            startingPotatoCount);
+
+        ImGui.SetNextItemWidth(180);
+        ImGui.InputInt(
+            "Numbers Added After Elimination",
+            ref potatoesAddedPerRound,
+            1,
+            5);
+
+        potatoesAddedPerRound = Math.Max(
+            1,
+            potatoesAddedPerRound);
+    }
+
+    private void DrawPotSettings()
+    {
+        ImGui.Text("Pot Settings");
+
+        ImGui.SetNextItemWidth(180);
+        ImGui.InputInt(
+            "Entry Fee Per Player",
+            ref entryFeeInput,
+            10_000,
+            100_000);
+
+        entryFeeInput = Math.Max(
+            0,
+            entryFeeInput);
+
+        ImGui.SetNextItemWidth(180);
+        ImGui.InputFloat(
+            "House Cut %",
+            ref houseCutPercent,
+            1f,
+            5f,
+            "%.1f");
+
+        houseCutPercent = Math.Clamp(
+            houseCutPercent,
+            0f,
+            100f);
+    }
+
+    private void DrawPotPreview()
+    {
+        var previewGrossPot =
+            (long)gameManager.Players.Count
+            * entryFeeInput;
+
+        var previewHouseCut = (long)Math.Round(
+            previewGrossPot
+            * (houseCutPercent / 100f),
+            MidpointRounding.AwayFromZero);
+
+        var previewWinnerPot =
+            previewGrossPot - previewHouseCut;
+
+        ImGui.Text("Pot Preview");
+        ImGui.Text(
+            $"Players: {gameManager.Players.Count}");
+
+        ImGui.Text(
+            $"Entry Fee: {entryFeeInput:N0} gil");
+
+        ImGui.Text(
+            $"Total Pot: {previewGrossPot:N0} gil");
+
+        ImGui.Text(
+            $"House Cut ({houseCutPercent:0.#}%): "
+            + $"{previewHouseCut:N0} gil");
+
+        ImGui.Text(
+            $"Winner Receives: {previewWinnerPot:N0} gil");
+    }
+
+    private void DrawStartGameButton()
+    {
+        if (!ImGui.Button("Start Game"))
         {
-            minimumRoll = 1;
+            return;
         }
 
-        if (maximumRoll < minimumRoll)
+        if (rollLimit < 1)
         {
-            maximumRoll = minimumRoll;
+            statusMessage =
+                "Enter a valid roll limit.";
+
+            return;
         }
 
-       if (ImGui.Button("Start Game"))
+        if (startingPotatoCount > rollLimit)
         {
-            if (minimumRoll < 1 || maximumRoll < minimumRoll)
-            {
-                statusMessage = "Enter a valid roll range.";
-            }
-            else
-            {
-                var rangeSize = maximumRoll - minimumRoll + 1;
+            statusMessage =
+                "Starting Hot Potato numbers cannot exceed the roll limit.";
 
-                if (rangeSize < gameManager.Settings.InitialNumberCount)
-                {
-                    statusMessage =
-                        $"The roll range must contain at least "
-                        + $"{gameManager.Settings.InitialNumberCount} numbers.";
-                }
-                else
-                {
-                    gameManager.Settings.MinimumNumber = minimumRoll;
-                    gameManager.Settings.MaximumNumber = maximumRoll;
+            return;
+        }
 
-                    if (gameManager.StartGame())
-                    {
-                        newestNumbers = gameManager.HotPotatoNumbers.ToList();
+        if (potatoesAddedPerRound < 1)
+        {
+            statusMessage =
+                "Numbers added after an elimination must be at least 1.";
 
-                        statusMessage =
-                            $"Round 1 started with {newestNumbers.Count} Hot Potato numbers "
-                            + $"using the range {minimumRoll}-{maximumRoll}.";
-                    }
-                    else
-                    {
-                        statusMessage =
-                            "Add at least two players before starting the game.";
-                    }
-                }
-            }
+            return;
+        }
+
+        var rangeSize = rollLimit;
+
+        if (rangeSize
+            < gameManager.Settings.InitialNumberCount)
+        {
+            statusMessage =
+                $"The roll range must contain at least "
+                + $"{gameManager.Settings.InitialNumberCount} numbers.";
+
+            return;
+        }
+
+        gameManager.Settings.MaximumNumber = 
+            rollLimit;
+        
+        gameManager.Settings.InitialNumberCount =
+            startingPotatoCount;
+
+        gameManager.Settings.NumbersPerRound =
+            potatoesAddedPerRound;
+
+        gameManager.Settings.EntryFee =
+            entryFeeInput;
+
+        gameManager.Settings.HouseCutPercent =
+            houseCutPercent;
+
+        if (!gameManager.StartGame())
+        {
+            statusMessage =
+                "Add at least two players and enter valid game settings.";
+
+            return;
+        }
+
+        newestNumbers =
+            gameManager.HotPotatoNumbers.ToList();
+
+        statusMessage =
+            $"Round 1 started with "
+            + $"{newestNumbers.Count} Hot Potato numbers "
+            + $"using a roll limit of {rollLimit}. "
+            + $"Winner payout: "
+            + $"{gameManager.WinnerPot:N0} gil.";
+
+        partyChatService.QueueMessage(
+            $"Hot Potato is starting! "
+            + $"{gameManager.StartingPlayerCount} players. "
+            + $"Use /dice party {rollLimit}.");
+
+        partyChatService.QueueMessage(
+            $"Starting with {startingPotatoCount} Hot Potato numbers. "
+            + $"{potatoesAddedPerRound} new numbers will be added "
+            + "after each elimination.");
+            
+        partyChatService.QueueMessage(
+            $"Entry: "
+            + $"{gameManager.Settings.EntryFee:N0} gil per player. "
+            + $"Total pot: "
+            + $"{gameManager.GrossPot:N0} gil.");
+
+        partyChatService.QueueMessage(
+             $"Winner receives: "
+            + $"{gameManager.WinnerPot:N0} gil.");
+
+        partyChatService.QueueNumberList(
+            "Starting Hot Potato numbers:",
+            newestNumbers);
+
+        if (gameManager.CurrentPlayer is not null)
+        {
+            partyChatService.QueueMessage(
+                $"{gameManager.CurrentPlayer.Name} rolls first!");
         }
     }
 
-        private void DrawRunningGame()
+    private void DrawRunningGame()
+    {
+        ImGui.Text(
+            $"Round {gameManager.CurrentRound}");
+
+        ImGui.Text(
+            $"Active Players: "
+            + $"{gameManager.ActivePlayers.Count}");
+
+        ImGui.Text(
+            $"Total Hot Potato Numbers: "
+            + $"{gameManager.HotPotatoNumbers.Count}");
+
+        ImGui.Spacing();
+
+        ImGui.Text("Game Pot");
+
+        ImGui.Text(
+            $"Entry Fee: "
+            + $"{gameManager.Settings.EntryFee:N0} gil");
+
+        ImGui.Text(
+            $"Total Pot: "
+            + $"{gameManager.GrossPot:N0} gil");
+
+        ImGui.Text(
+            $"House Cut: "
+            + $"{gameManager.HouseCutAmount:N0} gil "
+            + $"({gameManager.Settings.HouseCutPercent:0.#}%)");
+
+        ImGui.Text(
+            $"Winner Receives: "
+            + $"{gameManager.WinnerPot:N0} gil");
+
+        if (gameManager.CurrentPlayer is not null)
         {
-            ImGui.Text($"Round {gameManager.CurrentRound}");
-            ImGui.Text($"Active Players: {gameManager.ActivePlayers.Count}");
+            ImGui.Spacing();
+
             ImGui.Text(
-                $"Total Hot Potato Numbers: {gameManager.HotPotatoNumbers.Count}");
+                $"Current Roller: "
+                + $"{gameManager.CurrentPlayer.Name}");
+        }
 
-            if (gameManager.CurrentPlayer is not null)
-            {
-                ImGui.Text(
-                    $"Current Roller: {gameManager.CurrentPlayer.Name}");
-            }
-            if (gameManager.IsGameComplete && gameManager.Winner is not null)
-            {
-                ImGui.Spacing();
-                ImGui.Separator();
-                ImGui.Spacing();
-
-                ImGui.Text($"WINNER: {gameManager.Winner.Name}");
-
-                ImGui.Spacing();
-            }
-            
+        if (gameManager.IsGameComplete
+            && gameManager.Winner is not null)
+        {
             ImGui.Spacing();
             ImGui.Separator();
             ImGui.Spacing();
 
-            ImGui.Text("Hot Potato Numbers");
-            ImGui.Spacing();
+            ImGui.Text(
+                $"WINNER: {gameManager.Winner.Name}");
 
-            DrawNumberGrid(gameManager.HotPotatoNumbers);
+            ImGui.Text(
+                $"PAYOUT: "
+                + $"{gameManager.WinnerPot:N0} gil");
 
             ImGui.Spacing();
-            ImGui.Separator();
-            ImGui.Spacing();
+        }
 
-            ImGui.Text("Players");
-            ImGui.Spacing();
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
 
-            foreach (var player in gameManager.Players)
+        ImGui.Text("Hot Potato Numbers");
+        ImGui.Spacing();
+
+        DrawNumberGrid(
+            gameManager.HotPotatoNumbers);
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        DrawPlayerList();
+
+        ImGui.Spacing();
+
+        if (ImGui.Button("Reset Game"))
+        {
+            partyChatService.ClearQueue();
+            gameManager.ResetGame();
+
+            newestNumbers = Array.Empty<int>();
+            pendingRemovalPlayerId = null;
+
+            statusMessage =
+                "The game was reset.";
+        }
+    }
+
+    private void DrawPlayerList()
+    {
+        ImGui.Text("Players");
+        ImGui.Spacing();
+
+        foreach (var player in gameManager.Players)
+        {
+            var playerLabel = player.Name;
+
+            if (player.IsRemoved)
             {
-                var playerLabel = player.IsEliminated
-                    ? $"{player.Name} - Eliminated"
-                    : player.Name;
-
-                var isSelected = selectedPlayerId == player.Id;
-
-                if (ImGui.Selectable(
-                    $"{playerLabel}##{player.Id}",
-                    isSelected))
-                {
-                    selectedPlayerId = player.Id;
-                }
-
-                if (player.LastRoll.HasValue)
-                {
-                    ImGui.SameLine();
-                    ImGui.TextDisabled($"Last roll: {player.LastRoll.Value}");
-                }
+                playerLabel += " - Removed";
             }
-            if (!gameManager.IsGameComplete)
+            else if (player.IsEliminated)
             {
-                ImGui.Spacing();
-                ImGui.Separator();
-                ImGui.Spacing();
+                playerLabel += " - Eliminated";
+            }
 
-                ImGui.Text("Process Roll");
+            ImGui.Text(playerLabel);
 
-                ImGui.SetNextItemWidth(120);
-                ImGui.InputInt("##ManualRoll", ref manualRoll);
-
+            if (player.LastRoll.HasValue)
+            {
                 ImGui.SameLine();
 
-                if (ImGui.Button("Submit Roll"))
-                {
-                    if (!selectedPlayerId.HasValue)
-                    {
-                        statusMessage = "Select a player first.";
-                    }
-                    else if (gameManager.ProcessRoll(
-                        selectedPlayerId.Value,
-                        manualRoll,
-                        out var isHotPotato))
-                    {
-                        var player = gameManager.Players.First(
-                            currentPlayer =>
-                                currentPlayer.Id == selectedPlayerId.Value);
-
-                        if (gameManager.IsGameComplete
-                            && gameManager.Winner is not null)
-                        {
-                            statusMessage = isHotPotato
-                                ? $"{player.Name} rolled {manualRoll} and was eliminated. "
-                                    + $"{gameManager.Winner.Name} wins!"
-                                : $"{player.Name} rolled {manualRoll}. Safe.";
-                        }
-                        if (isHotPotato)
-                        {
-                            statusMessage =
-                                gameManager.IsGameComplete
-                                    ? $"{player.Name} rolled {manualRoll}. HOT POTATO! {gameManager.Winner?.Name} wins!"
-                                    : $"{player.Name} rolled {manualRoll}. HOT POTATO! They were eliminated. Round {gameManager.CurrentRound} started. {gameManager.CurrentPlayer?.Name} rolls next.";
-                        }
-                        else
-                        {
-                            statusMessage =
-                                $"{player.Name} rolled {manualRoll}. Safe. {gameManager.CurrentPlayer?.Name} rolls next.";
-                        }
-                    }
-                    else
-                    {
-                        statusMessage = "That roll could not be processed.";
-                    }
-                }
+                ImGui.TextDisabled(
+                    $"Last roll: {player.LastRoll.Value}");
             }
-            ImGui.Spacing();
 
-            if (!gameManager.IsGameComplete)
+            if (gameManager.IsGameRunning
+                && !gameManager.IsGameComplete
+                && player.IsActive)
             {
-                // if (ImGui.Button("Start Next Round"))
-                // {
-                //     newestNumbers = gameManager.StartNextRound();
-
-                //     statusMessage =
-                //         newestNumbers.Count > 0
-                //             ? $"Round {gameManager.CurrentRound} started. Added: "
-                //                 + string.Join(", ", newestNumbers)
-                //             : "No additional numbers could be generated.";
-                // }
-
                 ImGui.SameLine();
-            }
 
-            ImGui.SameLine();
+                if (ImGui.SmallButton(
+                        $"Remove##{player.Id}"))
+                {
+                    pendingRemovalPlayerId = player.Id;
 
-            if (ImGui.Button("Reset Game"))
-            {
-                    gameManager.ResetGame();
-
-                    newestNumbers = Array.Empty<int>();
-                    selectedPlayerId = null;
-                    manualRoll = 1;
-                    statusMessage = "The game was reset.";
+                    ImGui.OpenPopup(
+                        "Confirm Player Removal");
+                }
             }
         }
 
-    private static void DrawNumberGrid(
-    IReadOnlyList<int> numbers)
-{
-    const int columns = 5;
+        DrawRemovePlayerConfirmation();
+    }
 
-    if (ImGui.BeginTable(
-        "HotPotatoNumberTable",
-        columns,
-        ImGuiTableFlags.Borders
-        | ImGuiTableFlags.SizingStretchSame))
+    private void DrawRemovePlayerConfirmation()
     {
+        if (!ImGui.BeginPopupModal(
+                "Confirm Player Removal",
+                ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            return;
+        }
+
+        var player = pendingRemovalPlayerId.HasValue
+            ? gameManager.Players.FirstOrDefault(
+                currentPlayer =>
+                    currentPlayer.Id
+                    == pendingRemovalPlayerId.Value)
+            : null;
+
+        if (player is null)
+        {
+            ImGui.Text(
+                "The selected player could not be found.");
+
+            if (ImGui.Button("Close"))
+            {
+                pendingRemovalPlayerId = null;
+                ImGui.CloseCurrentPopup();
+            }
+
+            ImGui.EndPopup();
+            return;
+        }
+
+        ImGui.Text(
+            $"Remove {player.Name} from the game?");
+
+        ImGui.Spacing();
+
+        ImGui.TextWrapped(
+            "Their entry fee will be removed from the pot, "
+            + "and they will no longer participate.");
+
+        ImGui.Spacing();
+
+        if (ImGui.Button("Cancel"))
+        {
+            pendingRemovalPlayerId = null;
+            ImGui.CloseCurrentPopup();
+        }
+
+        ImGui.SameLine();
+
+        if (ImGui.Button("Remove Player"))
+        {
+            RemovePlayerDuringGame(player.Id);
+
+            pendingRemovalPlayerId = null;
+            ImGui.CloseCurrentPopup();
+        }
+
+        ImGui.EndPopup();
+    }
+    private void RemovePlayerDuringGame(Guid playerId)
+    {
+        if (!gameManager.RemovePlayerDuringGame(
+                playerId,
+                out var removedPlayer,
+                out var nextPlayer)
+            || removedPlayer is null)
+        {
+            statusMessage =
+                "That player could not be removed.";
+
+            return;
+        }
+
+        statusMessage =
+            $"{removedPlayer.Name} was removed. "
+            + $"Winner payout is now "
+            + $"{gameManager.WinnerPot:N0} gil.";
+
+        partyChatService.QueueMessage(
+            $"{removedPlayer.Name} has been removed "
+            + "from the game.");
+
+        partyChatService.QueueMessage(
+            $"Winner payout is now "
+            + $"{gameManager.WinnerPot:N0} gil.");
+
+        if (gameManager.IsGameComplete
+            && gameManager.Winner is not null)
+        {
+            statusMessage =
+                $"{removedPlayer.Name} was removed. "
+                + $"{gameManager.Winner.Name} wins "
+                + $"{gameManager.WinnerPot:N0} gil!";
+
+            partyChatService.QueueMessage(
+                $"{gameManager.Winner.Name} "
+                + "is the last remaining player!");
+
+            partyChatService.QueueMessage(
+                $"{gameManager.Winner.Name} receives "
+                + $"{gameManager.WinnerPot:N0} gil!");
+
+            return;
+        }
+
+        if (nextPlayer is not null)
+        {
+            partyChatService.QueueMessage(
+                $"{nextPlayer.Name} rolls next!");
+        }
+    }
+    private static void DrawNumberGrid(
+        IReadOnlyList<int> numbers)
+    {
+        const int columns = 5;
+
+        if (!ImGui.BeginTable(
+                "HotPotatoNumberTable",
+                columns,
+                ImGuiTableFlags.Borders
+                | ImGuiTableFlags.SizingStretchSame))
+        {
+            return;
+        }
+
         foreach (var number in numbers)
         {
             ImGui.TableNextColumn();
@@ -588,20 +906,26 @@ public sealed class MainWindow : Window
 
         ImGui.EndTable();
     }
-}
+
     private void AddPlayer()
     {
-        var nameBeingAdded = playerName.Trim();
+        var nameBeingAdded =
+            playerName.Trim();
 
-        if (gameManager.AddPlayer(nameBeingAdded))
-        {
-            statusMessage = $"{nameBeingAdded} was added.";
-            playerName = string.Empty;
-        }
-        else
+        if (gameManager.AddPlayer(
+                nameBeingAdded))
         {
             statusMessage =
-                "Enter a unique player name before adding a player.";
+                $"{nameBeingAdded} was added.";
+
+            playerName =
+                string.Empty;
+
+            return;
         }
+
+        statusMessage =
+            "Enter a unique player name "
+            + "before adding a player.";
     }
 }
