@@ -97,7 +97,42 @@ public sealed class GameManager
 
         return AddUniqueNumbers(Settings.NumbersPerRound);
     }
+        public bool ProcessRoll(
+        Guid playerId,
+        int roll,
+        out bool isHotPotato)
+    {
+        isHotPotato = false;
 
+        if (!IsGameRunning)
+        {
+            return false;
+        }
+
+        if (roll < Settings.MinimumNumber
+            || roll > Settings.MaximumNumber)
+        {
+            return false;
+        }
+
+        var player = players.FirstOrDefault(
+            currentPlayer => currentPlayer.Id == playerId);
+
+        if (player is null || player.IsEliminated)
+        {
+            return false;
+        }
+
+        player.LastRoll = roll;
+        isHotPotato = hotPotatoNumbers.Contains(roll);
+
+        if (isHotPotato)
+        {
+            player.IsEliminated = true;
+        }
+
+        return true;
+    }
     public void ResetGame()
     {
         IsGameRunning = false;

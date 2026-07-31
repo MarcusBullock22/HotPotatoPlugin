@@ -14,7 +14,8 @@ public sealed class MainWindow : Window
     private IReadOnlyList<int> newestNumbers = Array.Empty<int>();
     private string playerName = string.Empty;
     private string statusMessage = string.Empty;
-
+    private Guid? selectedPlayerId;
+    private int manualRoll = 1;
     public MainWindow(GameManager gameManager)
         : base("Hot Potato Game Manager")
     {
@@ -153,12 +154,65 @@ public sealed class MainWindow : Window
             ImGui.Spacing();
 
             ImGui.Text("Players");
+            ImGui.Spacing();
 
             foreach (var player in gameManager.Players)
             {
-                ImGui.BulletText(player.Name);
-            }
+                var playerLabel = player.IsEliminated
+                    ? $"{player.Name} - Eliminated"
+                    : player.Name;
 
+                var isSelected = selectedPlayerId == player.Id;
+
+                if (ImGui.Selectable(
+                    $"{playerLabel}##{player.Id}",
+                    isSelected))
+                {
+                    selectedPlayerId = player.Id;
+                }
+
+                if (player.LastRoll.HasValue)
+                {
+                    ImGui.SameLine();
+                    ImGui.TextDisabled($"Last roll: {player.LastRoll.Value}");
+                }
+            }
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+
+            ImGui.Text("Process Roll");
+
+            ImGui.SetNextItemWidth(120);
+            ImGui.InputInt("##ManualRoll", ref manualRoll);
+
+            ImGui.SameLine();
+
+            if (ImGui.Button("Submit Roll"))
+            {
+                if (!selectedPlayerId.HasValue)
+                {
+                    statusMessage = "Select a player first.";
+                }
+                else if (gameManager.ProcessRoll(
+                    selectedPlayerId.Value,
+                    manualRoll,
+                    out var isHotPotato))
+                {
+                    var player = gameManager.Players.First(
+                        currentPlayer =>
+                            currentPlayer.Id == selectedPlayerId.Value);
+
+                    statusMessage = isHotPotato
+                        ? $"{player.Name} rolled {manualRoll}. HOT POTATO! They were eliminated."
+                        : $"{player.Name} rolled {manualRoll}. Safe.";
+                }
+                else
+                {
+                    statusMessage =
+                        "That roll could not be processed.";
+                }
+            }
             ImGui.Spacing();
 
             if (ImGui.Button("Start Next Round"))
@@ -176,10 +230,12 @@ public sealed class MainWindow : Window
 
             if (ImGui.Button("Reset Game"))
             {
-                gameManager.ResetGame();
+                    gameManager.ResetGame();
 
-                newestNumbers = Array.Empty<int>();
-                statusMessage = "The game was reset.";
+                    newestNumbers = Array.Empty<int>();
+                    selectedPlayerId = null;
+                    manualRoll = 1;
+                    statusMessage = "The game was reset.";
             }
         }
 

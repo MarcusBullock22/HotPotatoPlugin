@@ -8,6 +8,10 @@ public sealed class Player
 
     public string Name { get; set; }
 
+    public int? LastRoll { get; set; }
+
+    public bool IsEliminated { get; set; }
+
     public Player(string name)
     {
         Name = name;
