@@ -136,10 +136,21 @@ public sealed class MainWindow : Window
         private void DrawRunningGame()
         {
             ImGui.Text($"Round {gameManager.CurrentRound}");
-            ImGui.Text($"Active Players: {gameManager.Players.Count}");
+            ImGui.Text($"Active Players: {gameManager.ActivePlayers.Count}");
             ImGui.Text(
                 $"Total Hot Potato Numbers: {gameManager.HotPotatoNumbers.Count}");
 
+            if (gameManager.IsGameComplete && gameManager.Winner is not null)
+            {
+                ImGui.Spacing();
+                ImGui.Separator();
+                ImGui.Spacing();
+
+                ImGui.Text($"WINNER: {gameManager.Winner.Name}");
+
+                ImGui.Spacing();
+            }
+            
             ImGui.Spacing();
             ImGui.Separator();
             ImGui.Spacing();
@@ -177,53 +188,72 @@ public sealed class MainWindow : Window
                     ImGui.TextDisabled($"Last roll: {player.LastRoll.Value}");
                 }
             }
-            ImGui.Spacing();
-            ImGui.Separator();
-            ImGui.Spacing();
-
-            ImGui.Text("Process Roll");
-
-            ImGui.SetNextItemWidth(120);
-            ImGui.InputInt("##ManualRoll", ref manualRoll);
-
-            ImGui.SameLine();
-
-            if (ImGui.Button("Submit Roll"))
+            if (!gameManager.IsGameComplete)
             {
-                if (!selectedPlayerId.HasValue)
-                {
-                    statusMessage = "Select a player first.";
-                }
-                else if (gameManager.ProcessRoll(
-                    selectedPlayerId.Value,
-                    manualRoll,
-                    out var isHotPotato))
-                {
-                    var player = gameManager.Players.First(
-                        currentPlayer =>
-                            currentPlayer.Id == selectedPlayerId.Value);
+                ImGui.Spacing();
+                ImGui.Separator();
+                ImGui.Spacing();
 
-                    statusMessage = isHotPotato
-                        ? $"{player.Name} rolled {manualRoll}. HOT POTATO! They were eliminated."
-                        : $"{player.Name} rolled {manualRoll}. Safe.";
-                }
-                else
+                ImGui.Text("Process Roll");
+
+                ImGui.SetNextItemWidth(120);
+                ImGui.InputInt("##ManualRoll", ref manualRoll);
+
+                ImGui.SameLine();
+
+                if (ImGui.Button("Submit Roll"))
                 {
-                    statusMessage =
-                        "That roll could not be processed.";
+                    if (!selectedPlayerId.HasValue)
+                    {
+                        statusMessage = "Select a player first.";
+                    }
+                    else if (gameManager.ProcessRoll(
+                        selectedPlayerId.Value,
+                        manualRoll,
+                        out var isHotPotato))
+                    {
+                        var player = gameManager.Players.First(
+                            currentPlayer =>
+                                currentPlayer.Id == selectedPlayerId.Value);
+
+                        if (gameManager.IsGameComplete
+                            && gameManager.Winner is not null)
+                        {
+                            statusMessage = isHotPotato
+                                ? $"{player.Name} rolled {manualRoll} and was eliminated. "
+                                    + $"{gameManager.Winner.Name} wins!"
+                                : $"{player.Name} rolled {manualRoll}. Safe.";
+                        }
+                        else
+                        {
+                            statusMessage = isHotPotato
+                                ? $"{player.Name} rolled {manualRoll}. "
+                                    + "HOT POTATO! They were eliminated."
+                                : $"{player.Name} rolled {manualRoll}. Safe.";
+                        }
+                    }
+                    else
+                    {
+                        statusMessage = "That roll could not be processed.";
+                    }
                 }
             }
             ImGui.Spacing();
 
-            if (ImGui.Button("Start Next Round"))
+            if (!gameManager.IsGameComplete)
             {
-                newestNumbers = gameManager.StartNextRound();
+                if (ImGui.Button("Start Next Round"))
+                {
+                    newestNumbers = gameManager.StartNextRound();
 
-                statusMessage =
-                    newestNumbers.Count > 0
-                        ? $"Round {gameManager.CurrentRound} started. Added: "
-                            + string.Join(", ", newestNumbers)
-                        : "No additional numbers could be generated.";
+                    statusMessage =
+                        newestNumbers.Count > 0
+                            ? $"Round {gameManager.CurrentRound} started. Added: "
+                                + string.Join(", ", newestNumbers)
+                            : "No additional numbers could be generated.";
+                }
+
+                ImGui.SameLine();
             }
 
             ImGui.SameLine();

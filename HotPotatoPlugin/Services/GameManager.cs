@@ -21,6 +21,19 @@ public sealed class GameManager
 
     public int CurrentRound { get; private set; }
 
+    public IReadOnlyList<Player> ActivePlayers =>
+    players.Where(player => !player.IsEliminated).ToList();
+
+    public Player? Winner =>
+        IsGameComplete
+            ? players.Single(player => !player.IsEliminated)
+            : null;
+
+    public bool IsGameComplete =>
+        IsGameRunning
+        && players.Count > 1
+        && players.Count(player => !player.IsEliminated) == 1;
+
     public bool AddPlayer(string playerName)
     {
         var cleanedName = playerName.Trim();
@@ -88,7 +101,7 @@ public sealed class GameManager
 
     public IReadOnlyList<int> StartNextRound()
     {
-        if (!IsGameRunning)
+        if (!IsGameRunning || IsGameComplete)
         {
             return Array.Empty<int>();
         }
@@ -104,7 +117,7 @@ public sealed class GameManager
     {
         isHotPotato = false;
 
-        if (!IsGameRunning)
+        if (!IsGameRunning || IsGameComplete)
         {
             return false;
         }
