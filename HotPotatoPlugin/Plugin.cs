@@ -19,6 +19,12 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService]
     internal static IPluginLog Log { get; private set; } = null!;
 
+    [PluginService]
+    internal static IPartyList PartyList { get; private set; } = null!;
+
+    [PluginService]
+    internal static IObjectTable ObjectTable { get; private set; } = null!;
+
     private const string CommandName = "/hotpotato";
 
     private readonly WindowSystem windowSystem = new("HotPotatoPlugin");
@@ -28,7 +34,10 @@ public sealed class Plugin : IDalamudPlugin
     public Plugin()
     {
         gameManager = new GameManager();
-        mainWindow = new MainWindow(gameManager);
+        mainWindow = new MainWindow(
+            gameManager,
+            PartyList,
+            ObjectTable);
 
         windowSystem.AddWindow(mainWindow);
 

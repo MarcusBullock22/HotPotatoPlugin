@@ -5,6 +5,7 @@ using Dalamud.Interface.Windowing;
 using HotPotatoPlugin.Services;
 using System;
 using System.Collections.Generic;
+using Dalamud.Plugin.Services;
 
 namespace HotPotatoPlugin.Windows;
 
@@ -16,18 +17,88 @@ public sealed class MainWindow : Window
     private string statusMessage = string.Empty;
     private Guid? selectedPlayerId;
     private int manualRoll = 1;
-    public MainWindow(GameManager gameManager)
-        : base("Hot Potato Game Manager")
-    {
-        this.gameManager = gameManager;
+    private readonly IPartyList partyList;
+    private readonly IObjectTable objectTable;
 
-        SizeConstraints = new WindowSizeConstraints
+        public MainWindow(
+            GameManager gameManager,
+            IPartyList partyList,
+            IObjectTable objectTable)
+            : base("Hot Potato Game Manager")
         {
-            MinimumSize = new Vector2(450, 350),
-            MaximumSize = new Vector2(900, 900)
-        };
-    }
+            this.gameManager = gameManager;
+            this.partyList = partyList;
+            this.objectTable = objectTable;
+        }
+    private void ImportPartyMembers()
+    {
+        if (gameManager.IsGameRunning)
+        {
+            statusMessage =
+                "You cannot import party members while a game is running.";
 
+            return;
+        }
+
+        var localPlayer = objectTable.LocalPlayer;
+
+        if (localPlayer is null)
+        {
+            statusMessage =
+                "Your character information is not currently available.";
+
+            return;
+        }
+
+        var localPlayerName = localPlayer.Name.TextValue;
+
+        var importedCount = 0;
+        var skippedCount = 0;
+
+        foreach (var partyMember in partyList)
+        {
+            var memberName = partyMember.Name.TextValue;
+
+            if (string.IsNullOrWhiteSpace(memberName))
+            {
+                continue;
+            }
+
+            // The local player is the host, not a participant.
+            if (string.Equals(
+                memberName,
+                localPlayerName,
+                StringComparison.OrdinalIgnoreCase))
+            {
+                skippedCount++;
+                continue;
+            }
+
+            var alreadyExists = gameManager.Players.Any(
+                player => string.Equals(
+                    player.Name,
+                    memberName,
+                    StringComparison.OrdinalIgnoreCase));
+
+            if (alreadyExists)
+            {
+                skippedCount++;
+                continue;
+            }
+            gameManager.AddPlayer(memberName);
+            importedCount++;
+        }
+
+        statusMessage = importedCount > 0
+            ? $"Imported {importedCount} party member(s)."
+            : "No new party members were found.";
+
+        if (skippedCount > 0)
+        {
+            statusMessage +=
+                $" Skipped {skippedCount} host or duplicate member(s).";
+        }
+    }
     public override void Draw()
     {
         DrawStatus();
@@ -90,7 +161,10 @@ public sealed class MainWindow : Window
         {
             AddPlayer();
         }
-
+        if (ImGui.Button("Import Current Party"))
+        {
+            ImportPartyMembers();
+        }
         ImGui.Spacing();
 
         if (gameManager.Players.Count == 0)
