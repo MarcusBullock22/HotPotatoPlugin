@@ -1,122 +1,164 @@
-﻿using System;
+﻿using System.Linq;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
-using Dalamud.Interface.Textures;
-using Dalamud.Interface.Utility;
-using Dalamud.Interface.Utility.Raii;
 using Dalamud.Interface.Windowing;
-using Lumina.Excel.Sheets;
+using HotPotatoPlugin.Services;
 
-namespace SamplePlugin.Windows;
+namespace HotPotatoPlugin.Windows;
 
-public class MainWindow : Window, IDisposable
+public sealed class MainWindow : Window
 {
-    private readonly string goatImagePath;
-    private readonly Plugin plugin;
+    private readonly GameManager gameManager;
 
-    // We give this window a hidden ID using ##.
-    // The user will see "My Amazing Window" as window title,
-    // but for ImGui the ID is "My Amazing Window##With a hidden ID"
-    public MainWindow(Plugin plugin, string goatImagePath)
-        : base("Hot Potato Game Manager", ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
+    private string playerName = string.Empty;
+    private string statusMessage = string.Empty;
+
+    public MainWindow(GameManager gameManager)
+        : base("Hot Potato Game Manager")
     {
+        this.gameManager = gameManager;
+
         SizeConstraints = new WindowSizeConstraints
         {
-            MinimumSize = new Vector2(375, 330),
-            MaximumSize = new Vector2(float.MaxValue, float.MaxValue)
+            MinimumSize = new Vector2(450, 350),
+            MaximumSize = new Vector2(900, 900)
         };
-
-        this.goatImagePath = goatImagePath;
-        this.plugin = plugin;
     }
-
-    public void Dispose() { }
 
     public override void Draw()
     {
-        ImGui.Text($"The random config bool is {plugin.Configuration.SomePropertyToBeSavedAndWithADefault}");
+        DrawStatus();
 
-        if (ImGui.Button("Show Settings"))
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        if (gameManager.IsGameRunning)
         {
-            plugin.ToggleConfigUi();
+            DrawRunningGame();
+        }
+        else
+        {
+            DrawGameSetup();
+        }
+
+        if (!string.IsNullOrWhiteSpace(statusMessage))
+        {
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+            ImGui.TextWrapped(statusMessage);
+        }
+    }
+
+    private void DrawStatus()
+    {
+        ImGui.Text("Game Status");
+
+        if (gameManager.IsGameRunning)
+        {
+            ImGui.Text("Game in progress");
+        }
+        else
+        {
+            ImGui.Text("No game running");
+        }
+
+        ImGui.Text($"Players: {gameManager.Players.Count}");
+    }
+
+    private void DrawGameSetup()
+    {
+        ImGui.Text("Players");
+        ImGui.Spacing();
+
+        ImGui.SetNextItemWidth(275);
+
+        var submittedWithEnter = ImGui.InputText(
+            "##PlayerName",
+            ref playerName,
+            50,
+            ImGuiInputTextFlags.EnterReturnsTrue);
+
+        ImGui.SameLine();
+
+        var addButtonClicked = ImGui.Button("Add Player");
+
+        if (submittedWithEnter || addButtonClicked)
+        {
+            AddPlayer();
         }
 
         ImGui.Spacing();
 
-        // Normally a BeginChild() would have to be followed by an unconditional EndChild(),
-        // ImRaii takes care of this after the scope ends.
-        // This works for all ImGui functions that require specific handling, examples are BeginTable() or Indent().
-        using (var child = ImRaii.Child("SomeChildWithAScrollbar", Vector2.Zero, true))
+        if (gameManager.Players.Count == 0)
         {
-            // Check if this child is drawing
-            if (child.Success)
+            ImGui.TextDisabled("No players have been added.");
+        }
+        else
+        {
+            foreach (var player in gameManager.Players.ToList())
             {
-                ImGui.Text("Have a goat:");
-                var goatImage = Plugin.TextureProvider.GetFromFile(goatImagePath).GetWrapOrDefault();
-                if (goatImage != null)
-                {
-                    using (ImRaii.PushIndent(55f))
-                    {
-                        ImGui.Image(goatImage.Handle, goatImage.Size);
-                    }
-                }
-                else
-                {
-                    ImGui.Text("Image not found.");
-                }
-
-                ImGuiHelpers.ScaledDummy(20.0f);
-
-                // Example for other services that Dalamud provides.
-                // PlayerState provides a wrapper filled with information about the player character.
-
-                var playerState = Plugin.PlayerState;
-                if (!playerState.IsLoaded)
-                {
-                    ImGui.Text("Our local player is currently not logged in.");
-                    return;
-                }
-                
-                if (!playerState.ClassJob.IsValid)
-                {
-                    ImGui.Text("Our current job is currently not valid.");
-                    return;
-                }
-                
-                ImGui.AlignTextToFramePadding();
-                ImGui.Text($"Current job:");
-                
-                // Scaling hardcoded pixel values is important, as otherwise users with HUD scales above or below 100%
-                // won't be able to see everything.
-                ImGui.SameLine(120 * ImGuiHelpers.GlobalScale);
-                
-                // Get the icon id from a known offset + the class jobs id
-                var jobIconId = 62100 + playerState.ClassJob.RowId;
-                var iconTexture = Plugin.TextureProvider.GetFromGameIcon(new GameIconLookup(jobIconId)).GetWrapOrEmpty();
-                ImGui.Image(iconTexture.Handle, new Vector2(28, 28) * ImGuiHelpers.GlobalScale);
-                
+                ImGui.Text(player.Name);
                 ImGui.SameLine();
-                
-                // If you want to see the Macro representation of this SeString use `.ToMacroString()`
-                // More info about SeStrings: https://dalamud.dev/plugin-development/sestring/
-                ImGui.Text(playerState.ClassJob.Value.Abbreviation.ToString());
-                
-                ImGui.SameLine();
-                ImGui.Text($" [Level {playerState.Level}]");
-                
-                // Example for querying Lumina, getting the name of our current area.
-                var territoryId = Plugin.ClientState.TerritoryType;
-                if (Plugin.DataManager.GetExcelSheet<TerritoryType>().TryGetRow(territoryId, out var territoryRow))
+
+                if (ImGui.SmallButton($"Remove##{player.Id}"))
                 {
-                    ImGui.Text($"Current location:");
-                    ImGui.SameLine(120 * ImGuiHelpers.GlobalScale);
-                    ImGui.Text(territoryRow.PlaceName.Value.Name.ToString());
-                }
-                else
-                {
-                    ImGui.Text("Invalid territory.");
+                    gameManager.RemovePlayer(player.Id);
+                    statusMessage = $"{player.Name} was removed.";
                 }
             }
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        if (ImGui.Button("Start Game"))
+        {
+            if (gameManager.StartGame())
+            {
+                statusMessage = "The game has started.";
+            }
+            else
+            {
+                statusMessage =
+                    "Add at least two players before starting the game.";
+            }
+        }
+    }
+
+    private void DrawRunningGame()
+    {
+        ImGui.Text("Active Players");
+        ImGui.Spacing();
+
+        foreach (var player in gameManager.Players)
+        {
+            ImGui.BulletText(player.Name);
+        }
+
+        ImGui.Spacing();
+
+        if (ImGui.Button("Reset Game"))
+        {
+            gameManager.ResetGame();
+            statusMessage = "The game was reset.";
+        }
+    }
+
+    private void AddPlayer()
+    {
+        var nameBeingAdded = playerName.Trim();
+
+        if (gameManager.AddPlayer(nameBeingAdded))
+        {
+            statusMessage = $"{nameBeingAdded} was added.";
+            playerName = string.Empty;
+        }
+        else
+        {
+            statusMessage =
+                "Enter a unique player name before adding a player.";
         }
     }
 }
