@@ -3,13 +3,15 @@ using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
 using HotPotatoPlugin.Services;
+using System;
+using System.Collections.Generic;
 
 namespace HotPotatoPlugin.Windows;
 
 public sealed class MainWindow : Window
 {
     private readonly GameManager gameManager;
-
+    private IReadOnlyList<int> newestNumbers = Array.Empty<int>();
     private string playerName = string.Empty;
     private string statusMessage = string.Empty;
 
@@ -117,7 +119,10 @@ public sealed class MainWindow : Window
         {
             if (gameManager.StartGame())
             {
-                statusMessage = "The game has started.";
+                newestNumbers = gameManager.HotPotatoNumbers.ToList();
+
+                statusMessage =
+                    $"Round 1 started with {newestNumbers.Count} Hot Potato numbers.";
             }
             else
             {
@@ -127,25 +132,77 @@ public sealed class MainWindow : Window
         }
     }
 
-    private void DrawRunningGame()
+        private void DrawRunningGame()
+        {
+            ImGui.Text($"Round {gameManager.CurrentRound}");
+            ImGui.Text($"Active Players: {gameManager.Players.Count}");
+            ImGui.Text(
+                $"Total Hot Potato Numbers: {gameManager.HotPotatoNumbers.Count}");
+
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+
+            ImGui.Text("Hot Potato Numbers");
+            ImGui.Spacing();
+
+            DrawNumberGrid(gameManager.HotPotatoNumbers);
+
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+
+            ImGui.Text("Players");
+
+            foreach (var player in gameManager.Players)
+            {
+                ImGui.BulletText(player.Name);
+            }
+
+            ImGui.Spacing();
+
+            if (ImGui.Button("Start Next Round"))
+            {
+                newestNumbers = gameManager.StartNextRound();
+
+                statusMessage =
+                    newestNumbers.Count > 0
+                        ? $"Round {gameManager.CurrentRound} started. Added: "
+                            + string.Join(", ", newestNumbers)
+                        : "No additional numbers could be generated.";
+            }
+
+            ImGui.SameLine();
+
+            if (ImGui.Button("Reset Game"))
+            {
+                gameManager.ResetGame();
+
+                newestNumbers = Array.Empty<int>();
+                statusMessage = "The game was reset.";
+            }
+        }
+
+    private static void DrawNumberGrid(
+    IReadOnlyList<int> numbers)
+{
+    const int columns = 5;
+
+    if (ImGui.BeginTable(
+        "HotPotatoNumberTable",
+        columns,
+        ImGuiTableFlags.Borders
+        | ImGuiTableFlags.SizingStretchSame))
     {
-        ImGui.Text("Active Players");
-        ImGui.Spacing();
-
-        foreach (var player in gameManager.Players)
+        foreach (var number in numbers)
         {
-            ImGui.BulletText(player.Name);
+            ImGui.TableNextColumn();
+            ImGui.Text(number.ToString());
         }
 
-        ImGui.Spacing();
-
-        if (ImGui.Button("Reset Game"))
-        {
-            gameManager.ResetGame();
-            statusMessage = "The game was reset.";
-        }
+        ImGui.EndTable();
     }
-
+}
     private void AddPlayer()
     {
         var nameBeingAdded = playerName.Trim();
