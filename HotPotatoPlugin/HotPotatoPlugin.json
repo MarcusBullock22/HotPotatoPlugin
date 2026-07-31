@@ -1,0 +1,12 @@
+{
+  "Author": "Marcus Bullock",
+  "Name": "Hot Potato Game Manager",
+  "Punchline": "Manage Hot Potato party games in FFXIV.",
+  "Description": "Tracks players, rounds, Hot Potato numbers, eliminations, and payouts.",
+  "ApplicableVersion": "any",
+  "Tags": [
+    "party",
+    "game",
+    "hot-potato"
+  ]
+}
