@@ -149,11 +149,16 @@ public sealed class MainWindow : Window
                 return;
             }
 
-        var player = gameManager.Players.FirstOrDefault(
-            currentPlayer => string.Equals(
-                currentPlayer.Name,
-                senderName,
-                StringComparison.OrdinalIgnoreCase));
+            var player = gameManager.Players
+                .OrderByDescending(currentPlayer => currentPlayer.Name.Length)
+                .FirstOrDefault(currentPlayer =>
+                    string.Equals(
+                        currentPlayer.Name,
+                        senderName,
+                        StringComparison.OrdinalIgnoreCase)
+                    || senderName.StartsWith(
+                        currentPlayer.Name,
+                        StringComparison.OrdinalIgnoreCase));
 
         if (player is null)
         {
@@ -225,14 +230,14 @@ public sealed class MainWindow : Window
         if (isHotPotato)
         {
             statusMessage =
-                $"{player.Name} rolled {roll}. HOT POTATO! "
+                $"{player.Name} rolled {roll}. HOT POTATO!\n"
                 + $"They were eliminated. Round "
-                + $"{gameManager.CurrentRound} started. "
+                + $"{gameManager.CurrentRound} started.\n"
                 + $"{gameManager.CurrentPlayer?.Name} rolls next.";
 
             partyChatService.QueueMessage(
                 $"{player.Name} rolled {roll}. HOT POTATO! "
-                + "They have been eliminated.");
+                + "They have been eliminated! <se.6>");
 
             partyChatService.QueueMessage(
                 $"Round {gameManager.CurrentRound} is starting.");
@@ -250,12 +255,17 @@ public sealed class MainWindow : Window
         else
         {
             statusMessage =
-                $"{player.Name} rolled {roll}. Safe. "
+                $"{player.Name} rolled {roll}. Safe.\n"
                 + $"{gameManager.CurrentPlayer?.Name} rolls next.";
 
             partyChatService.QueueMessage(
-                $"{player.Name} rolled {roll}. Safe! "
-                + $"{gameManager.CurrentPlayer?.Name} rolls next.");
+                $"{player.Name} rolled {roll}. Safe!");
+
+            if (gameManager.CurrentPlayer is not null)
+            {
+                partyChatService.QueueMessage(
+                    $"{gameManager.CurrentPlayer.Name} rolls next!");
+            }
         }
     }
 
