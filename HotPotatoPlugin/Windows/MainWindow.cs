@@ -2,10 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
-using System.Text.RegularExpressions;
 using Dalamud.Bindings.ImGui;
-using Dalamud.Game.Chat;
-using Dalamud.Game.Text;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin.Services;
 using HotPotatoPlugin.Services;
@@ -17,8 +14,8 @@ public sealed class MainWindow : Window
     private readonly GameManager gameManager;
     private readonly IPartyList partyList;
     private readonly IObjectTable objectTable;
-    private readonly IChatGui chatGui;
     private readonly PartyChatService partyChatService;
+    private readonly DiceRollService diceRollService;
     private IReadOnlyList<int> newestNumbers = Array.Empty<int>();
     private string playerName = string.Empty;
     private string statusMessage = string.Empty;
@@ -32,23 +29,22 @@ public sealed class MainWindow : Window
     public MainWindow(
         GameManager gameManager,
         PartyChatService partyChatService,
+        DiceRollService diceRollService,
         IPartyList partyList,
-        IObjectTable objectTable,
-        IChatGui chatGui)
+        IObjectTable objectTable)
         : base("Hot Potato Game Manager")
     {
         this.gameManager = gameManager;
         this.partyChatService = partyChatService;
         this.partyList = partyList;
         this.objectTable = objectTable;
-        this.chatGui = chatGui;
-
-        this.chatGui.ChatMessage += OnChatMessage;
+        this.diceRollService = diceRollService;
+        this.diceRollService.OnRollReceived += OnRollReceived;
     }
 
     public void Dispose()
     {
-        chatGui.ChatMessage -= OnChatMessage;
+        diceRollService.OnRollReceived -= OnRollReceived;
     }
 
     public override void Draw()
@@ -78,89 +74,46 @@ public sealed class MainWindow : Window
         }
     }
 
-    private void OnChatMessage(IHandleableChatMessage chatMessage)
+    private void OnRollReceived(string playerName, int roll, int outOf)
     {
-        if (chatMessage.LogKind != XivChatType.Party
-            && chatMessage.LogKind != XivChatType.RandomNumber)
-        {
-            return;
-        }
+        ProcessRoll(playerName, roll, outOf);
+    }
 
+    private void LogRollForTesting(string playerName, int roll, int outOf)
+    {
+            statusMessage =
+                $"Detected dice roll: {playerName} rolled "
+                + $"{roll} out of {outOf}.";
+    }
+
+    private void ProcessRoll(string senderName, int roll, int outOf)
+    {
         if (!gameManager.IsGameRunning
             || gameManager.IsGameComplete)
         {
             return;
         }
 
-        var senderText = chatMessage.Sender.TextValue.Trim();
-        var messageText = chatMessage.Message.TextValue.Trim();
-
-        var rollMatch = Regex.Match(
-            messageText,
-            @"^random!\s*(?:\(\s*(\d+)\s*-\s*(\d+)\s*\)\s*)?(\d+)\s*$",
-            RegexOptions.IgnoreCase);
-
-        if (!rollMatch.Success)
+        if (outOf != gameManager.Settings.MaximumNumber)
         {
+            statusMessage =
+                $"{senderName} used the wrong dice limit. "
+                + $"Expected {gameManager.Settings.MaximumNumber}, "
+                + $"but they used {outOf}.";
+
             return;
         }
 
-        if (!int.TryParse(
-                rollMatch.Groups[3].Value,
-                out var roll))
-        {
-            return;
-        }
-
-        var senderName = Regex.Replace(
-            senderText,
-            @"^[^\p{L}]+",
-            string.Empty).Trim();
-
-        if (rollMatch.Groups[1].Success
-            && rollMatch.Groups[2].Success)
-        {
-            if (!int.TryParse(
-                    rollMatch.Groups[1].Value,
-                    out var messageMinimum)
-                || !int.TryParse(
-                    rollMatch.Groups[2].Value,
-                    out var messageMaximum))
-            {
-                return;
-            }
-
-            if (messageMinimum != 1
-                || messageMaximum != gameManager.Settings.MaximumNumber)
-            {
-                statusMessage =
-                    $"{senderName} used the wrong dice limit. "
-                    + $"Expected {gameManager.Settings.MaximumNumber}, "
-                    + $"but they used {messageMaximum}.";
-
-                return;
-            }
-        }
-            else if (gameManager.Settings.MaximumNumber != 999)
-            {
-                statusMessage =
-                    $"{senderName} used the standard dice limit of 999. "
-                    + $"Expected "
-                    + $"{gameManager.Settings.MaximumNumber}.";
-
-                return;
-            }
-
-            var player = gameManager.Players
-                .OrderByDescending(currentPlayer => currentPlayer.Name.Length)
-                .FirstOrDefault(currentPlayer =>
-                    string.Equals(
-                        currentPlayer.Name,
-                        senderName,
-                        StringComparison.OrdinalIgnoreCase)
-                    || senderName.StartsWith(
-                        currentPlayer.Name,
-                        StringComparison.OrdinalIgnoreCase));
+        var player = gameManager.Players
+            .OrderByDescending(currentPlayer => currentPlayer.Name.Length)
+            .FirstOrDefault(currentPlayer =>
+                string.Equals(
+                    currentPlayer.Name,
+                    senderName,
+                    StringComparison.OrdinalIgnoreCase)
+                || senderName.StartsWith(
+                    currentPlayer.Name,
+                    StringComparison.OrdinalIgnoreCase));
 
         if (player is null)
         {
@@ -224,7 +177,7 @@ public sealed class MainWindow : Window
 
             partyChatService.QueueMessage(
                 $"{gameManager.Winner.Name} receives "
-                + $"{gameManager.WinnerPot:N0} gil! ");
+                + $"{gameManager.WinnerPot:N0} gil!");
 
             return;
         }

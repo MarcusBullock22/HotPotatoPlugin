@@ -19,8 +19,12 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService]
     internal static IPluginLog Log { get; private set; } = null!;
 
-   // [PluginService]
+    // TO DO: Take out after testing
+    // [PluginService] 
     //internal static IFramework Framework { get; private set; } = null!;
+
+    [PluginService]
+    internal static IGameInteropProvider GameInteropProvider { get; private set; } = null!;
 
     [PluginService]
     internal static IPartyList PartyList { get; private set; } = null!;
@@ -38,20 +42,25 @@ public sealed class Plugin : IDalamudPlugin
 
     private readonly GameManager gameManager;
     private readonly PartyChatService partyChatService;
+    private readonly DiceRollService diceRollService;
     private readonly MainWindow mainWindow;
 
     public Plugin()
     {
         gameManager = new GameManager();
 
+        diceRollService = new DiceRollService(
+            GameInteropProvider,
+            Log);
+
         partyChatService = new PartyChatService(Log);
 
         mainWindow = new MainWindow(
             gameManager,
             partyChatService,
+            diceRollService,
             PartyList,
-            ObjectTable,
-            ChatGui);
+            ObjectTable);
 
         windowSystem.AddWindow(mainWindow);
 
@@ -76,6 +85,7 @@ public sealed class Plugin : IDalamudPlugin
         CommandManager.RemoveHandler(CommandName);
 
         mainWindow.Dispose();
+        diceRollService.Dispose();
         partyChatService.Dispose();
 
         windowSystem.RemoveAllWindows();
