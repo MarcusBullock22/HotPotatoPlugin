@@ -14,9 +14,7 @@ public unsafe sealed class DiceRollService : IDisposable
 
     public event Action<string, int, int>? OnRollReceived;
 
-    [Signature(
-        "48 89 5C 24 ?? 48 89 6C 24 ?? 56 57 41 56 48 81 EC ?? ?? ?? ?? 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 84 24 ?? ?? ?? ?? 0F B7 BC 24",
-        DetourName = nameof(DicePrintLogDetour))]
+    [Signature("48 89 5C 24 ?? 48 89 6C 24 ?? 56 57 41 56 48 81 EC ?? ?? ?? ?? 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 84 24 ?? ?? ?? ?? 0F B7 BC 24", DetourName = nameof(DicePrintLogDetour))]
     private Hook<DicePrintLogDelegate> dicePrintLogHook = null!;
 
     private delegate void DicePrintLogDelegate(
