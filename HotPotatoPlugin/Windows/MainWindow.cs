@@ -66,6 +66,8 @@ public sealed class MainWindow : Window
         {
             DrawGameSetup();
         }
+        
+        DrawPendingPartyMessages();
 
         if (!string.IsNullOrWhiteSpace(statusMessage))
         {
@@ -947,5 +949,55 @@ public sealed class MainWindow : Window
         statusMessage =
             "Enter a unique player name "
             + "before adding a player.";
+    }
+
+    private void SendNextPartyMessage()
+    {
+        if (partyChatService.SendNextMessage())
+        {
+            statusMessage = "Party announcement sent.";
+        }
+        else
+        {
+            statusMessage = "Party announcement could not be sent.";
+        }
+    }
+
+    private void DrawPendingPartyMessages()
+    {
+    if (partyChatService.PendingMessageCount == 0)
+    {
+        return;
+    }
+
+    
+
+    ImGui.Spacing();
+    ImGui.Separator();
+    ImGui.Spacing();
+
+    ImGui.Text("Pending Party Announcement");
+    ImGui.TextWrapped(
+        partyChatService.NextMessage
+        ?? string.Empty);
+
+    ImGui.Spacing();
+
+    if (ImGui.Button("Send to Party"))
+    {
+        SendNextPartyMessage();
+    }
+
+    ImGui.SameLine();
+
+    if (ImGui.Button("Skip"))
+    {
+        partyChatService.SkipNextMessage();
+    }
+
+    ImGui.SameLine();
+
+    ImGui.TextDisabled(
+        $"{partyChatService.PendingMessageCount} queued");
     }
 }

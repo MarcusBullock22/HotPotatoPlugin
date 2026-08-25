@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.System.String;
 using FFXIVClientStructs.FFXIV.Client.UI;
@@ -10,150 +11,42 @@ namespace HotPotatoPlugin.Services;
 public sealed class PartyChatService : IDisposable
 {
     private const int MaximumMessageLength = 400;
-    private const double MessageDelaySeconds = 1.25;
 
     private readonly Queue<string> messageQueue = new();
-    private readonly IFramework framework;
-    private readonly IPluginLog pluginLog;
 
-    private DateTime nextMessageTime = DateTime.MinValue;
     private bool isDisposed;
-
-    public PartyChatService(
-        IFramework framework,
-        IPluginLog pluginLog)
-    {
-        this.framework = framework;
-        this.pluginLog = pluginLog;
-
-        framework.Update += OnFrameworkUpdate;
-    }
 
     public int PendingMessageCount => messageQueue.Count;
 
-    public void QueueMessage(string message)
+    private readonly IPluginLog pluginLog;
+
+    public string? NextMessage =>
+        messageQueue.Count > 0
+            ? messageQueue.Peek()
+            : null;
+
+
+    public PartyChatService(IPluginLog pluginLog)
     {
-        if (isDisposed)
-        {
-            return;
-        }
+        this.pluginLog = pluginLog;
+    } 
 
-        var cleanedMessage = message.Trim();
-
-        if (string.IsNullOrWhiteSpace(cleanedMessage))
-        {
-            return;
-        }
-
-        if (cleanedMessage.Length <= MaximumMessageLength)
-        {
-            messageQueue.Enqueue(cleanedMessage);
-            return;
-        }
-
-        QueueLongMessage(cleanedMessage);
-    }
-
-    public void QueueNumberList(
-        string heading,
-        IEnumerable<int> numbers)
-    {
-        if (isDisposed)
-        {
-            return;
-        }
-
-        var currentMessage = heading.Trim();
-
-        foreach (var number in numbers)
-        {
-            var numberText =
-                currentMessage == heading
-                    ? $" {number}"
-                    : $", {number}";
-
-            if (currentMessage.Length + numberText.Length
-                > MaximumMessageLength)
-            {
-                QueueMessage(currentMessage);
-                currentMessage = $"{heading} {number}";
-            }
-            else
-            {
-                currentMessage += numberText;
-            }
-        }
-
-        if (!string.Equals(
-                currentMessage,
-                heading,
-                StringComparison.Ordinal))
-        {
-            QueueMessage(currentMessage);
-        }
-    }
-
-    public void ClearQueue()
-    {
-        messageQueue.Clear();
-        nextMessageTime = DateTime.MinValue;
-    }
-
-    private void QueueLongMessage(string message)
-    {
-        var remainingMessage = message;
-
-        while (remainingMessage.Length > MaximumMessageLength)
-        {
-            var splitPosition = remainingMessage.LastIndexOf(
-                ' ',
-                MaximumMessageLength);
-
-            if (splitPosition <= 0)
-            {
-                splitPosition = MaximumMessageLength;
-            }
-
-            var section = remainingMessage[..splitPosition].Trim();
-
-            if (!string.IsNullOrWhiteSpace(section))
-            {
-                messageQueue.Enqueue(section);
-            }
-
-            remainingMessage =
-                remainingMessage[splitPosition..].Trim();
-        }
-
-        if (!string.IsNullOrWhiteSpace(remainingMessage))
-        {
-            messageQueue.Enqueue(remainingMessage);
-        }
-    }
-
-    private void OnFrameworkUpdate(IFramework framework)
+    public bool SendNextMessage()
     {
         if (isDisposed || messageQueue.Count == 0)
         {
-            return;
+            return false;
         }
 
-        if (DateTime.UtcNow < nextMessageTime)
-        {
-            return;
-        }
-
-        var message = messageQueue.Dequeue();
+        var message = messageQueue.Peek();
 
         if (!SendPartyMessage(message))
         {
-            pluginLog.Warning(
-                "Party announcement could not be sent: {Message}",
-                message);
+            return false;
         }
 
-        nextMessageTime =
-            DateTime.UtcNow.AddSeconds(MessageDelaySeconds);
+        messageQueue.Dequeue();
+        return true;
     }
 
     private unsafe bool SendPartyMessage(string message)
@@ -199,7 +92,7 @@ public sealed class PartyChatService : IDisposable
                 uiModule);
 
             pluginLog.Debug(
-                "Sent party announcement: {Message}",
+                "Sent party announcement by user action: {Message}",
                 message);
 
             return true;
@@ -214,6 +107,135 @@ public sealed class PartyChatService : IDisposable
         }
     }
 
+    public void QueueMessage(string message)
+    {
+        if (isDisposed)
+        {
+            return;
+        }
+
+        var cleanedMessage = message.Trim();
+
+        if (string.IsNullOrWhiteSpace(cleanedMessage))
+        {
+            return;
+        }
+
+        if (cleanedMessage.Length <= MaximumMessageLength)
+        {
+            messageQueue.Enqueue(cleanedMessage);
+            return;
+        }
+
+        QueueLongMessage(cleanedMessage);
+    }
+
+    public void QueueNumberList(
+        string heading,
+        IEnumerable<int> numbers)
+    {
+        if (isDisposed)
+        {
+            return;
+        }
+
+        var numberList = numbers.ToList();
+
+        if (numberList.Count == 0)
+        {
+            return;
+        }
+
+        var currentMessage = heading.Trim();
+
+        foreach (var number in numberList)
+        {
+            var numberText =
+                currentMessage == heading
+                    ? $" {number}"
+                    : $", {number}";
+
+            if (currentMessage.Length + numberText.Length
+                > MaximumMessageLength)
+            {
+                QueueMessage(currentMessage);
+                currentMessage = $"{heading} {number}";
+            }
+            else
+            {
+                currentMessage += numberText;
+            }
+        }
+
+        if (!string.Equals(
+            currentMessage,
+            heading,
+            StringComparison.Ordinal))
+        {
+            QueueMessage(currentMessage);
+        }
+    }
+
+    public bool TryTakeNextMessage(out string message)
+    {
+        if (isDisposed || messageQueue.Count == 0)
+        {
+            message = string.Empty;
+            return false;
+        }
+
+        message = messageQueue.Dequeue();
+        return true;
+    }
+
+    public void SkipNextMessage()
+    {
+        if (isDisposed || messageQueue.Count == 0)
+        {
+            return;
+        }
+
+        messageQueue.Dequeue();
+    }
+
+    public void ClearQueue()
+    {
+        messageQueue.Clear();
+    }
+
+    private void QueueLongMessage(string message)
+    {
+        var remainingMessage = message;
+
+        while (remainingMessage.Length > MaximumMessageLength)
+        {
+            var splitPosition = remainingMessage.LastIndexOf(
+                ' ',
+                MaximumMessageLength);
+
+            if (splitPosition <= 0)
+            {
+                splitPosition = MaximumMessageLength;
+            }
+
+            var section =
+                remainingMessage[..splitPosition].Trim();
+
+            if (!string.IsNullOrWhiteSpace(section))
+            {
+                messageQueue.Enqueue(section);
+            }
+
+            remainingMessage =
+                remainingMessage[splitPosition..].Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(remainingMessage))
+        {
+            messageQueue.Enqueue(remainingMessage);
+        }
+    }
+
     public void Dispose()
     {
         if (isDisposed)
@@ -222,9 +244,6 @@ public sealed class PartyChatService : IDisposable
         }
 
         isDisposed = true;
-
-        framework.Update -= OnFrameworkUpdate;
-
-        ClearQueue();
+        messageQueue.Clear();
     }
 }

@@ -19,8 +19,8 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService]
     internal static IPluginLog Log { get; private set; } = null!;
 
-    [PluginService]
-    internal static IFramework Framework { get; private set; } = null!;
+   // [PluginService]
+    //internal static IFramework Framework { get; private set; } = null!;
 
     [PluginService]
     internal static IPartyList PartyList { get; private set; } = null!;
@@ -44,9 +44,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         gameManager = new GameManager();
 
-        partyChatService = new PartyChatService(
-            Framework,
-            Log);
+        partyChatService = new PartyChatService(Log);
 
         mainWindow = new MainWindow(
             gameManager,
