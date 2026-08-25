@@ -20,16 +20,47 @@ public sealed class PartyChatService : IDisposable
 
     private readonly IPluginLog pluginLog;
 
+    private readonly IFramework framework;
+
+    private DateTime nextMessageTime = DateTime.MinValue;
+
+    private static readonly TimeSpan MessageDelay = TimeSpan.FromMilliseconds(1200);
+
     public string? NextMessage =>
         messageQueue.Count > 0
             ? messageQueue.Peek()
             : null;
 
 
-    public PartyChatService(IPluginLog pluginLog)
+    public PartyChatService(IFramework framework, IPluginLog pluginLog)
     {
+        this.framework = framework;
         this.pluginLog = pluginLog;
+
+        this.framework.Update += OnFrameworkUpdate;
     } 
+
+    private void OnFrameworkUpdate(IFramework framework)
+    {
+        if (isDisposed
+            || messageQueue.Count == 0
+            || DateTime.UtcNow < nextMessageTime)
+        {
+            return;
+        }
+
+        var message = messageQueue.Peek();
+
+        if (!SendPartyMessage(message))
+        {
+            return;
+        }
+
+        messageQueue.Dequeue();
+
+        nextMessageTime =
+            DateTime.UtcNow + MessageDelay;
+    }
 
     public bool SendNextMessage()
     {
@@ -244,6 +275,7 @@ public sealed class PartyChatService : IDisposable
         }
 
         isDisposed = true;
+        framework.Update -= OnFrameworkUpdate;
         messageQueue.Clear();
     }
 }

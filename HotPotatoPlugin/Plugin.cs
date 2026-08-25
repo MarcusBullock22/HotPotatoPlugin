@@ -19,9 +19,8 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService]
     internal static IPluginLog Log { get; private set; } = null!;
 
-    // TO DO: Take out after testing
-    // [PluginService] 
-    //internal static IFramework Framework { get; private set; } = null!;
+    [PluginService] 
+    internal static IFramework Framework { get; private set; } = null!;
 
     [PluginService]
     internal static IGameInteropProvider GameInteropProvider { get; private set; } = null!;
@@ -53,7 +52,7 @@ public sealed class Plugin : IDalamudPlugin
             GameInteropProvider,
             Log);
 
-        partyChatService = new PartyChatService(Log);
+        partyChatService = new PartyChatService(Framework, Log);
 
         mainWindow = new MainWindow(
             gameManager,
