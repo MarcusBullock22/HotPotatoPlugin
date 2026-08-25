@@ -1,12 +1,13 @@
 {
   "Author": "Marcus Bullock",
   "Name": "Hot Potato Game Manager",
-  "Punchline": "Manage Hot Potato party games in FFXIV.",
-  "Description": "Tracks players, rounds, Hot Potato numbers, eliminations, and payouts.",
-  "ApplicableVersion": "any",
+  "Punchline": "Manage a party-based Hot Potato dice game.",
+  "Description": "A Dalamud plugin for managing a party-based Hot Potato dice game. Tracks players, rounds, Hot Potato numbers, eliminations, turn order, and party announcements. Open the game manager with /hotpotato.",
+  "RepoUrl": "https://github.com/MarcusBullock22/HotPotatoPlugin",
   "Tags": [
-    "party",
     "game",
-    "hot-potato"
+    "party",
+    "dice",
+    "hot potato"
   ]
 }

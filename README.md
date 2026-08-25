@@ -18,7 +18,7 @@ Hot Potato Game Manager is a Dalamud plugin for Final Fantasy XIV that helps man
 
 Open the plugin with:
 
-/hotpotato
+`/hotpotato`
 
 Add the participating players and configure the game from the Hot Potato Game Manager window.
 
