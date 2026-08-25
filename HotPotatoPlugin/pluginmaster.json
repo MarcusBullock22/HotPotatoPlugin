@@ -1,0 +1,25 @@
+[
+  {
+    "Author": "Marcus Bullock",
+    "Name": "Hot Potato Game Manager",
+    "InternalName": "HotPotatoPlugin",
+    "AssemblyVersion": "0.0.0.1",
+    "Punchline": "Manage a party-based Hot Potato dice game.",
+    "Description": "A Dalamud plugin for managing a party-based Hot Potato dice game. Tracks players, rounds, Hot Potato numbers, eliminations, turn order, and party announcements.",
+    "RepoUrl": "https://github.com/MarcusBullock22/HotPotatoPlugin",
+    "ApplicableVersion": "any",
+    "Tags": [
+      "game",
+      "party",
+      "dice",
+      "hot potato"
+    ],
+    "DalamudApiLevel": 15,
+    "IsHide": false,
+    "IsTestingExclusive": false,
+    "IconUrl": "https://raw.githubusercontent.com/MarcusBullock22/HotPotatoPlugin/master/HotPotatoPlugin/images/icon.png",
+    "DownloadLinkInstall": "https://github.com/MarcusBullock22/HotPotatoPlugin/releases/download/v0.0.0.1/HotPotatoRelease.zip",
+    "DownloadLinkTesting": "https://github.com/MarcusBullock22/HotPotatoPlugin/releases/download/v0.0.0.1/HotPotatoRelease.zip",
+    "DownloadLinkUpdate": "https://github.com/MarcusBullock22/HotPotatoPlugin/releases/download/v0.0.0.1/HotPotatoRelease.zip"
+  }
+]
