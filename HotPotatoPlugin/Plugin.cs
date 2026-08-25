@@ -3,6 +3,7 @@ using Dalamud.IoC;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
+using HotPotatoPlugin.Services;
 using HotPotatoPlugin.Windows;
 
 namespace HotPotatoPlugin;
@@ -13,43 +14,48 @@ public sealed class Plugin : IDalamudPlugin
     internal static IDalamudPluginInterface PluginInterface { get; private set; } = null!;
 
     [PluginService]
-    internal static ITextureProvider TextureProvider { get; private set; } = null!;
-
-    [PluginService]
     internal static ICommandManager CommandManager { get; private set; } = null!;
-
-    [PluginService]
-    internal static IClientState ClientState { get; private set; } = null!;
-
-    [PluginService]
-    internal static IPlayerState PlayerState { get; private set; } = null!;
-
-    [PluginService]
-    internal static IDataManager DataManager { get; private set; } = null!;
 
     [PluginService]
     internal static IPluginLog Log { get; private set; } = null!;
 
+    [PluginService]
+    internal static IFramework Framework { get; private set; } = null!;
+
+    [PluginService]
+    internal static IPartyList PartyList { get; private set; } = null!;
+
+    [PluginService]
+    internal static IObjectTable ObjectTable { get; private set; } = null!;
+
+    [PluginService]
+    internal static IChatGui ChatGui { get; private set; } = null!;
+
     private const string CommandName = "/hotpotato";
 
-    public Configuration Configuration { get; init; }
+    private readonly WindowSystem windowSystem =
+        new("HotPotatoPlugin");
 
-    public readonly WindowSystem WindowSystem = new("HotPotatoPlugin");
-
-    private ConfigWindow ConfigWindow { get; init; }
-    private MainWindow MainWindow { get; init; }
+    private readonly GameManager gameManager;
+    private readonly PartyChatService partyChatService;
+    private readonly MainWindow mainWindow;
 
     public Plugin()
     {
-        Configuration =
-            PluginInterface.GetPluginConfig() as Configuration
-            ?? new Configuration();
+        gameManager = new GameManager();
 
-        ConfigWindow = new ConfigWindow(this);
-        MainWindow = new MainWindow(this);
+        partyChatService = new PartyChatService(
+            Framework,
+            Log);
 
-        WindowSystem.AddWindow(ConfigWindow);
-        WindowSystem.AddWindow(MainWindow);
+        mainWindow = new MainWindow(
+            gameManager,
+            partyChatService,
+            PartyList,
+            ObjectTable,
+            ChatGui);
+
+        windowSystem.AddWindow(mainWindow);
 
         CommandManager.AddHandler(
             CommandName,
@@ -58,8 +64,7 @@ public sealed class Plugin : IDalamudPlugin
                 HelpMessage = "Open the Hot Potato game manager."
             });
 
-        PluginInterface.UiBuilder.Draw += WindowSystem.Draw;
-        PluginInterface.UiBuilder.OpenConfigUi += ToggleConfigUi;
+        PluginInterface.UiBuilder.Draw += windowSystem.Draw;
         PluginInterface.UiBuilder.OpenMainUi += ToggleMainUi;
 
         Log.Information("Hot Potato Plugin loaded.");
@@ -69,13 +74,18 @@ public sealed class Plugin : IDalamudPlugin
     {
         PluginInterface.UiBuilder.Draw -= windowSystem.Draw;
         PluginInterface.UiBuilder.OpenMainUi -= ToggleMainUi;
-        mainWindow.Dispose();
+
         CommandManager.RemoveHandler(CommandName);
+
+        mainWindow.Dispose();
         partyChatService.Dispose();
+
         windowSystem.RemoveAllWindows();
     }
 
-    private void OnCommand(string command, string args)
+    private void OnCommand(
+        string command,
+        string args)
     {
         mainWindow.Toggle();
     }
